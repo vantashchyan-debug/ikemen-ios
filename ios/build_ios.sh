@@ -100,6 +100,9 @@ export CC="$CLANG ${ARCH_FLAGS[*]}"
 export CXX="$(xcrun --sdk iphoneos -f clang++) ${ARCH_FLAGS[*]}"
 export CGO_CFLAGS="-O2 -I$PREFIX/include -I$PREFIX/include/SDL2 -Wno-deprecated-declarations -Wno-unused-command-line-argument"
 export CGO_LDFLAGS="-L$PREFIX/lib -F$FW"
+# SDL2's pkg-config uses -Wl,-weak_framework,... which cgo rejects by default.
+# (c-archive does not link anyway; the real link happens below.)
+export CGO_LDFLAGS_ALLOW='.*' CGO_CFLAGS_ALLOW='.*'
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 (
 	cd "$ROOT/engine"
