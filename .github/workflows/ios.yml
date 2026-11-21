@@ -48,7 +48,15 @@ jobs:
         run: |
           # If the repo contains your game in ./game, it is bundled directly.
           if [ -d game/data ]; then export GAME_DIR="$GITHUB_WORKSPACE/game"; fi
-          ios/build_ios.sh
+          set -o pipefail
+          if ! ios/build_ios.sh 2>&1 | tee build.log; then
+            # Surface the tail of the log as a public annotation (readable without login)
+            grep -iE 'error|fatal|undefined|failed' build.log | tail -n 40 > err.log || true
+            tail -n 60 build.log >> err.log
+            msg=$(sed -e 's/%/%25/g' err.log | awk '{printf "%s%%0A", $0}')
+            echo "::error title=build_ios.sh failed::${msg}"
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
