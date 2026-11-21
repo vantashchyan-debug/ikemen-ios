@@ -32,8 +32,8 @@ jobs:
           command -v pkg-config >/dev/null || brew install pkgconf
           cmake --version
 
-      - name: Cache native deps (SDL2, libxmp, MoltenVK)
-        uses: actions/cache@v4
+      - name: Restore native deps (SDL2, libxmp, MoltenVK)
+        uses: actions/cache/restore@v4
         with:
           path: |
             build-ios/prefix
@@ -51,12 +51,24 @@ jobs:
           set -o pipefail
           if ! ios/build_ios.sh 2>&1 | tee build.log; then
             # Surface the tail of the log as a public annotation (readable without login)
-            grep -iE 'error|fatal|undefined|failed' build.log | tail -n 40 > err.log || true
-            tail -n 60 build.log >> err.log
+            { grep -E 'error:|fatal error|Undefined symbols|undefined reference|ld: |\*\*\* |^# |cannot |undefined: ' build.log \
+                | grep -v -- '-Werror' | head -n 40 | cut -c1-400
+              echo '----- tail -----'
+              grep -v -- ' -cc1 \| -Werror' build.log | tail -n 25 | cut -c1-400; } > err.log || true
             msg=$(sed -e 's/%/%25/g' err.log | awk '{printf "%s%%0A", $0}')
             echo "::error title=build_ios.sh failed::${msg}"
             exit 1
           fi
+
+      - name: Save native deps
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build-ios/prefix
+            build-ios/frameworks
+            build-ios/downloads
+          key: ios-deps-${{ env.SDL_VER }}-${{ env.MVK_VER }}-${{ env.XMP_VER }}-${{ hashFiles('ios/build_ios.sh') }}
 
       - uses: actions/upload-artifact@v4
         with:
