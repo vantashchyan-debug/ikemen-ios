@@ -1,0 +1,58 @@
+name: iOS IPA
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+    inputs:
+      bundle_id:
+        description: "Bundle ID"
+        default: "com.ikemen.go.ios"
+        required: false
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      SDL_VER: "2.32.10"
+      MVK_VER: "v1.4.2"
+      XMP_VER: "4.7.4"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: engine/go.sum
+
+      - name: Tools
+        run: |
+          command -v pkg-config >/dev/null || brew install pkgconf
+          cmake --version
+
+      - name: Cache native deps (SDL2, libxmp, MoltenVK)
+        uses: actions/cache@v4
+        with:
+          path: |
+            build-ios/prefix
+            build-ios/frameworks
+            build-ios/downloads
+          key: ios-deps-${{ env.SDL_VER }}-${{ env.MVK_VER }}-${{ env.XMP_VER }}-${{ hashFiles('ios/build_ios.sh') }}
+
+      - name: Build
+        env:
+          APP_BUILD: ${{ github.run_number }}
+          BUNDLE_ID: ${{ github.event.inputs.bundle_id || 'com.ikemen.go.ios' }}
+        run: |
+          # If the repo contains your game in ./game, it is bundled directly.
+          if [ -d game/data ]; then export GAME_DIR="$GITHUB_WORKSPACE/game"; fi
+          ios/build_ios.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ikemen_GO-ios-${{ github.run_number }}
+          path: build-ios/*.ipa
+          compression-level: 0
+          retention-days: 14

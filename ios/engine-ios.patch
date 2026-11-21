@@ -1,0 +1,605 @@
+diff --git a/src/font_gl33.go b/src/font_gl33.go
+index 0e7e970..9a666d8 100644
+--- a/src/font_gl33.go
++++ b/src/font_gl33.go
+@@ -1,4 +1,4 @@
+-//go:build !android
++//go:build !android && !ios
+ 
+ package main
+ 
+diff --git a/src/input.go b/src/input.go
+index e43fc45..12d29cb 100644
+--- a/src/input.go
++++ b/src/input.go
+@@ -450,6 +450,13 @@ func (ir *InputReader) LocalInput(in int) [14]bool {
+ 		joyIn = GetJoystickState(sys.joystickConfig[in])
+ 	}
+ 
++	// Touch / on-screen controller (merged into the joystick channel)
++	if touchIn, ok := touchInputFor(in); ok {
++		for i := range joyIn {
++			joyIn[i] = joyIn[i] || touchIn[i]
++		}
++	}
++
+ 	// Merge both
+ 	U := keyIn[0] || joyIn[0]
+ 	D := keyIn[1] || joyIn[1]
+diff --git a/src/main.go b/src/main.go
+index e285176..55db11e 100644
+--- a/src/main.go
++++ b/src/main.go
+@@ -19,7 +19,8 @@ var Version = "development"
+ var BuildTime = "" // Set automatically by GitHub Actions
+ 
+ func init() {
+-	if runtime.GOOS != "android" {
++	// On Android/iOS the engine is a library: SDL_main locks the real main thread.
++	if runtime.GOOS != "android" && runtime.GOOS != "ios" {
+ 		runtime.LockOSThread()
+ 	}
+ }
+@@ -177,6 +178,10 @@ func realMain() {
+ 	if runtime.GOOS == "android" {
+ 		cfg.Video.RenderMode = "OpenGL ES 3.2"
+ 	}
++	// iOS only has Vulkan (MoltenVK on Metal) + platform tuning
++	if runtime.GOOS == "ios" {
++		applyIOSConfigOverrides(cfg)
++	}
+ 	sys.cfg = *cfg
+ 	// Logcat("LOG: Config Loaded. System Script: " + sys.cfg.Config.System)
+ 
+diff --git a/src/platform_hooks_other.go b/src/platform_hooks_other.go
+new file mode 100644
+index 0000000..55ab891
+--- /dev/null
++++ b/src/platform_hooks_other.go
+@@ -0,0 +1,11 @@
++//go:build !ios
++
++package main
++
++import "github.com/veandco/go-sdl2/sdl"
++
++// Platform hooks; only iOS needs them (see util_ios.go).
++func platformBeforeWindow(flags sdl.WindowFlags) sdl.WindowFlags { return flags }
++func platformAfterWindow(window *sdl.Window)                     {}
++func platformAppSuspended(suspended bool)                        {}
++func applyIOSConfigOverrides(cfg *Config)                        {}
+diff --git a/src/render_gl33.go b/src/render_gl33.go
+index 00b2303..658c2b1 100644
+--- a/src/render_gl33.go
++++ b/src/render_gl33.go
+@@ -1,4 +1,4 @@
+-//go:build !android
++//go:build !android && !ios
+ 
+ package main
+ 
+diff --git a/src/render_vk.go b/src/render_vk.go
+index e67fd5f..04e4727 100644
+--- a/src/render_vk.go
++++ b/src/render_vk.go
+@@ -1585,7 +1585,7 @@ func (r *Renderer_VK) NewVulkanDevice(appInfo *vk.ApplicationInfo, window uintpt
+ 		"VK_KHR_push_descriptor\x00",
+ 	}
+ 
+-	if runtime.GOOS == "darwin" {
++	if runtime.GOOS == "darwin" || runtime.GOOS == "ios" {
+ 		deviceExtensions = append(deviceExtensions, "VK_KHR_portability_subset\x00")
+ 	}
+ 	deviceCreateInfo := &vk.DeviceCreateInfo{
+@@ -6774,8 +6774,8 @@ func (r *Renderer_VK) RenderQuad() {
+ 	}
+ 
+ 	// MacOS MoltenVK workaround: push constants need to be set every draw call
+-	if switchedProgram || r.VKState.palTexture != r.currentSpriteTexture.palTexture || runtime.GOOS == "darwin" {
+-		if switchedProgram || r.VKState.palTexture.img != r.currentSpriteTexture.palTexture.img || r.VKState.palTexture.offset[0] != r.currentSpriteTexture.palTexture.offset[0] || r.VKState.palTexture.offset[1] != r.currentSpriteTexture.palTexture.offset[1] || runtime.GOOS == "darwin" {
++	if switchedProgram || r.VKState.palTexture != r.currentSpriteTexture.palTexture || (runtime.GOOS == "darwin" || runtime.GOOS == "ios") {
++		if switchedProgram || r.VKState.palTexture.img != r.currentSpriteTexture.palTexture.img || r.VKState.palTexture.offset[0] != r.currentSpriteTexture.palTexture.offset[0] || r.VKState.palTexture.offset[1] != r.currentSpriteTexture.palTexture.offset[1] || (runtime.GOOS == "darwin" || runtime.GOOS == "ios") {
+ 			uvst := r.VKState.palTexture.uvst
+ 			vk.CmdPushConstants(r.commandBuffers[0], targetProgram.pipelineLayout, vk.ShaderStageFlags(vk.ShaderStageFragmentBit), 0, 16, unsafe.Pointer(&uvst))
+ 		}
+diff --git a/src/system.go b/src/system.go
+index 5339736..4331ca4 100644
+--- a/src/system.go
++++ b/src/system.go
+@@ -964,7 +964,7 @@ func (s *System) update() bool {
+ 
+ 	// Correct the joystick mappings (macOS)
+ 	for i := 0; i < len(sys.joystickConfig); i++ {
+-		if runtime.GOOS == "darwin" && !sys.joystickConfig[i].isInitialized {
++		if (runtime.GOOS == "darwin" || runtime.GOOS == "ios") && !sys.joystickConfig[i].isInitialized {
+ 			joyS := i
+ 			if joyS < len(sys.joystickConfig) {
+ 				if input.IsJoystickPresent(joyS) {
+@@ -1233,6 +1233,10 @@ func (s *System) anyHardButton() bool {
+ 		}
+ 	}
+ 
++	if touchButtonMask.Load()&0x3F0 != 0 { // a, b, c, x, y, z on the touch pad
++		return true
++	}
++
+ 	return false
+ }
+ 
+diff --git a/src/system_sdl.go b/src/system_sdl.go
+index f67ba22..000763b 100644
+--- a/src/system_sdl.go
++++ b/src/system_sdl.go
+@@ -15,6 +15,7 @@ type Window struct {
+ 	x, y, w, h int
+ 	fullscreen bool
+ 	closeflag  bool
++	suspended  bool // app is in the background (mobile); rendering must stop
+ }
+ 
+ func (s *System) newWindow(w, h int) (*Window, error) {
+@@ -120,10 +121,12 @@ func (s *System) newWindow(w, h int) (*Window, error) {
+ 			posX, posY = 0, 0
+ 		}
+ 
++		windowFlags = platformBeforeWindow(windowFlags)
+ 		window, err = sdl.CreateWindow(s.cfg.Config.WindowTitle, posX, posY, w2, h2, windowFlags)
+ 		if err != nil {
+ 			return nil, fmt.Errorf("failed to create window: %w", err)
+ 		}
++		platformAfterWindow(window)
+ 
+ 		// 6. POST-CREATION ATTRIBUTES
+ 		window.SetResizable(true)
+@@ -148,7 +151,7 @@ func (s *System) newWindow(w, h int) (*Window, error) {
+ 		input.controllerstate[i] = &ControllerState{Buttons: make(map[sdl.GameControllerButton]byte)}
+ 	}
+ 
+-	return &Window{window, s.cfg.Config.WindowTitle, int(x), int(y), w, h, fullscreen, false}, nil
++	return &Window{window, s.cfg.Config.WindowTitle, int(x), int(y), w, h, fullscreen, false, false}, nil
+ }
+ 
+ func (w *Window) SwapBuffers() {
+@@ -198,6 +201,12 @@ func (w *Window) SetSwapInterval(interval int) {
+ }
+ 
+ func (w *Window) GetSize() (int, int) {
++	if runtime.GOOS == "ios" {
++		// UIKit window sizes are in points; the Vulkan swapchain and the
++		// viewport need real pixels (2532x1170 on iPhone 12 Pro).
++		w2, h2 := w.Window.VulkanGetDrawableSize()
++		return int(w2), int(h2)
++	}
+ 	w2, h2 := w.Window.GetSize()
+ 	return int(w2), int(h2)
+ }
+@@ -363,7 +372,35 @@ func (w *Window) UpdateDebugFPS() {
+ 
+ func (w *Window) pollEvents() {
+ 	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
++		w.handleEvent(event)
++	}
++	// While the app is in the background (iOS/Android) the GPU must not be
++	// used. Block here until we are back in the foreground.
++	for w.suspended && !w.closeflag {
++		if event := sdl.WaitEvent(); event != nil {
++			w.handleEvent(event)
++		}
++	}
++}
++
++func (w *Window) handleEvent(event sdl.Event) {
++	{
+ 		switch t := event.(type) {
++		case sdl.CommonEvent:
++			switch t.Type {
++			case sdl.APP_WILLENTERBACKGROUND, sdl.APP_DIDENTERBACKGROUND:
++				if runtime.GOOS == "ios" {
++					w.suspended = true
++					platformAppSuspended(true)
++				}
++			case sdl.APP_DIDENTERFOREGROUND:
++				if w.suspended {
++					w.suspended = false
++					platformAppSuspended(false)
++				}
++			case sdl.APP_TERMINATING:
++				w.closeflag = true
++			}
+ 		case sdl.ControllerAxisEvent:
+ 			// FIX: Map Instance ID (t.Which) to Array Index
+ 			if idx := findControllerIndex(t.Which); idx != -1 {
+diff --git a/src/touch_input.go b/src/touch_input.go
+new file mode 100644
+index 0000000..ec9e99d
+--- /dev/null
++++ b/src/touch_input.go
+@@ -0,0 +1,52 @@
++package main
++
++import "sync/atomic"
++
++// Virtual (on-screen / touch) controller.
++//
++// A platform layer (the native UIKit overlay on iOS) reports which game
++// buttons are held as a bitmask. The mask is OR-ed into the local input of the
++// configured player slot inside InputReader.LocalInput, so it behaves exactly
++// like a keyboard or gamepad: menus, fights, training, command buffers etc.
++//
++// Bit order matches the [14]bool layout used by GetKeyboardState:
++//
++//	0 U, 1 D, 2 L, 3 R, 4 a, 5 b, 6 c, 7 x, 8 y, 9 z, 10 s, 11 d, 12 w, 13 m
++const touchButtonCount = 14
++
++var (
++	touchButtonMask atomic.Uint32
++	touchPlayerSlot atomic.Int32 // 0-based player index the touch pad drives
++)
++
++// TouchSetState replaces the full virtual button state.
++func TouchSetState(player int, mask uint32) {
++	if player < 0 || player > 7 {
++		player = 0
++	}
++	touchPlayerSlot.Store(int32(player))
++	touchButtonMask.Store(mask & (1<<touchButtonCount - 1))
++}
++
++// TouchKey injects a raw keyboard key (SDL keycode) press or release.
++// Used for system keys such as Escape, Pause or F-keys from touch buttons.
++func TouchKey(keycode int, down bool) {
++	var noMods ModifierKey
++	if down {
++		OnKeyPressed(Key(keycode), noMods)
++	} else {
++		OnKeyReleased(Key(keycode), noMods)
++	}
++}
++
++// touchInputFor returns the virtual pad state for the given 0-based player.
++func touchInputFor(in int) (out [touchButtonCount]bool, ok bool) {
++	mask := touchButtonMask.Load()
++	if mask == 0 || int(touchPlayerSlot.Load()) != in {
++		return out, false
++	}
++	for i := 0; i < touchButtonCount; i++ {
++		out[i] = mask&(1<<uint(i)) != 0
++	}
++	return out, true
++}
+diff --git a/src/util_darwin.go b/src/util_darwin.go
+index 5cbad4d..975ddad 100644
+--- a/src/util_darwin.go
++++ b/src/util_darwin.go
+@@ -1,4 +1,4 @@
+-//go:build darwin
++//go:build darwin && !ios
+ 
+ package main
+ 
+diff --git a/src/util_desktop.go b/src/util_desktop.go
+index ebd02a8..99f0dda 100644
+--- a/src/util_desktop.go
++++ b/src/util_desktop.go
+@@ -1,4 +1,4 @@
+-//go:build !raw && !android
++//go:build !raw && !android && !ios
+ 
+ package main
+ 
+diff --git a/src/util_ios.go b/src/util_ios.go
+new file mode 100644
+index 0000000..1f4fc48
+--- /dev/null
++++ b/src/util_ios.go
+@@ -0,0 +1,272 @@
++//go:build ios
++
++package main
++
++/*
++#cgo CFLAGS: -DSDL_MAIN_HANDLED
++#include <stdlib.h>
++#include <stdint.h>
++
++// Implemented by the native iOS shell (ios/src/*.m), resolved at final link.
++extern void        IKOverlayInstall(void);
++extern void        IKOverlaySetSuspended(int suspended);
++extern const char* IKPreferredLanguage(void);
++*/
++import "C"
++
++import (
++	"fmt"
++	"io"
++	"io/fs"
++	"os"
++	"path/filepath"
++	"runtime"
++	"runtime/debug"
++	"strings"
++
++	findfont "github.com/flopp/go-findfont"
++	"github.com/veandco/go-sdl2/sdl"
++)
++
++// Folders shipped read-only inside the app bundle (Ikemen.app/game/<dir>).
++// They are symlinked into the writable work directory. If the user puts a real
++// folder with the same name into Documents/Ikemen (Files app), it is used
++// instead, which allows modding without rebuilding the .ipa.
++var iosAssetDirs = []string{"data", "external", "font", "chars", "stages", "sound", "video", "art"}
++
++//export SDL_main
++func SDL_main(argc C.int, argv **C.char) C.int {
++	runtime.LockOSThread()
++
++	// iPhone 12 Pro has 6 GB RAM; iOS kills apps well before that. A soft
++	// limit makes the GC work harder instead of letting jetsam kill us.
++	debug.SetMemoryLimit(1600 << 20)
++
++	// Hints that must be set before SDL_Init / window creation.
++	sdl.SetHint("SDL_IOS_ORIENTATIONS", "LandscapeLeft LandscapeRight")
++	sdl.SetHint("SDL_IOS_HIDE_HOME_INDICATOR", "2") // dim + defer edge gestures
++	sdl.SetHint("SDL_IOS_IDLE_TIMER_DISABLED", "1")
++	sdl.SetHint("SDL_ACCELEROMETER_AS_JOYSTICK", "0")
++
++	if err := prepareIOSWorkdir(); err != nil {
++		ShowErrorDialog("Failed to prepare game files:\n" + err.Error())
++		return 1
++	}
++	if len(os.Args) == 0 {
++		os.Args = []string{"Ikemen_GO"}
++	} else {
++		os.Args = os.Args[:1] // ignore launch arguments from UIKit
++	}
++	realMain()
++	return 0
++}
++
++func iosBundleGameDir() string {
++	exe, err := os.Executable()
++	if err != nil {
++		return ""
++	}
++	return filepath.Join(filepath.Dir(exe), "game")
++}
++
++func prepareIOSWorkdir() error {
++	bundle := iosBundleGameDir()
++	home := os.Getenv("HOME")
++	if home == "" {
++		return fmt.Errorf("HOME is not set")
++	}
++	work := filepath.Join(home, "Documents", "Ikemen")
++	if err := os.MkdirAll(work, 0755); err != nil {
++		return err
++	}
++
++	for _, d := range iosAssetDirs {
++		src := filepath.Join(bundle, d)
++		if _, err := os.Stat(src); err != nil {
++			continue
++		}
++		dst := filepath.Join(work, d)
++		if fi, err := os.Lstat(dst); err == nil {
++			if fi.Mode()&os.ModeSymlink == 0 {
++				continue // user override (real folder)
++			}
++			// The bundle path changes on every reinstall/update: always refresh.
++			os.Remove(dst)
++		}
++		if err := os.Symlink(src, dst); err != nil {
++			return fmt.Errorf("symlink %s: %w", d, err)
++		}
++	}
++
++	// Seed writable save/ (config.ini, stats...) without overwriting user data.
++	seed := filepath.Join(bundle, "save")
++	if _, err := os.Stat(seed); err == nil {
++		filepath.WalkDir(seed, func(p string, d fs.DirEntry, err error) error {
++			if err != nil {
++				return nil
++			}
++			rel, _ := filepath.Rel(seed, p)
++			target := filepath.Join(work, "save", rel)
++			if d.IsDir() {
++				os.MkdirAll(target, 0755)
++				return nil
++			}
++			if _, err := os.Stat(target); err == nil {
++				return nil
++			}
++			return copyFileIOS(p, target)
++		})
++	}
++	for _, d := range []string{"save/replays", "save/logs", "cache"} {
++		os.MkdirAll(filepath.Join(work, d), 0755)
++	}
++	return os.Chdir(work)
++}
++
++func copyFileIOS(src, dst string) error {
++	in, err := os.Open(src)
++	if err != nil {
++		return err
++	}
++	defer in.Close()
++	out, err := os.Create(dst)
++	if err != nil {
++		return err
++	}
++	if _, err := io.Copy(out, in); err != nil {
++		out.Close()
++		return err
++	}
++	return out.Close()
++}
++
++// Runtime-only config tweaks for iPhone (not written back to config.ini).
++func applyIOSConfigOverrides(cfg *Config) {
++	cfg.Video.RenderMode = "Vulkan 1.3"
++	cfg.Video.Fullscreen = true
++	cfg.Video.Borderless = false
++	cfg.Video.WindowWidth, cfg.Video.WindowHeight = 0, 0
++	cfg.Video.RendererDebugMode = false
++	// Shadow maps need layered rendering that MoltenVK only partly exposes.
++	cfg.Video.EnableModelShadow = false
++	// Apple GPUs resolve MSAA on-tile, but >4x is wasted on a 460 ppi screen.
++	if cfg.Video.MSAA > 4 {
++		cfg.Video.MSAA = 4
++	}
++	if cfg.Video.Framerate <= 0 || cfg.Video.Framerate > 60 {
++		cfg.Video.Framerate = 60
++	}
++	// Decoding whole BGM tracks to RAM costs hundreds of MB with FLAC music.
++	cfg.Sound.BGMRAMBuffer = false
++	cfg.Debug.DumpLuaTables = false
++}
++
++func platformBeforeWindow(flags sdl.WindowFlags) sdl.WindowFlags {
++	return flags | sdl.WINDOW_ALLOW_HIGHDPI | sdl.WINDOW_FULLSCREEN | sdl.WINDOW_BORDERLESS
++}
++
++func platformAfterWindow(window *sdl.Window) {
++	C.IKOverlayInstall()
++}
++
++func platformAppSuspended(suspended bool) {
++	if suspended {
++		TouchSetState(int(touchPlayerSlot.Load()), 0)
++		C.IKOverlaySetSuspended(1)
++	} else {
++		C.IKOverlaySetSuspended(0)
++	}
++}
++
++// ---------------------------------------------------------------------------
++// Bridge called from the native touch overlay (main thread, inside SDL pump).
++
++//export IkemenTouchSetState
++func IkemenTouchSetState(player C.int, mask C.uint32_t) {
++	TouchSetState(int(player), uint32(mask))
++}
++
++//export IkemenTouchKey
++func IkemenTouchKey(keycode C.int, down C.int) {
++	TouchKey(int(keycode), down != 0)
++}
++
++//export IkemenGameIsRunning
++func IkemenGameIsRunning() C.int {
++	if sys.gameRunning {
++		return 1
++	}
++	return 0
++}
++
++// IkemenPlayerFacing returns 1 if the player's root char faces right, -1 if
++// left. Lets touch macros use facing-relative directions (F/B, numpad 236...).
++//
++//export IkemenPlayerFacing
++func IkemenPlayerFacing(player C.int) C.int {
++	p := int(player)
++	if !sys.gameRunning || p < 0 || p >= len(sys.chars) || len(sys.chars[p]) == 0 || sys.chars[p][0] == nil {
++		return 1
++	}
++	if sys.chars[p][0].facing < 0 {
++		return -1
++	}
++	return 1
++}
++
++// ---------------------------------------------------------------------------
++// Platform utility implementations (desktop versions live in util_desktop.go)
++
++func NewLogWriter() io.Writer {
++	return os.Stderr
++}
++
++func ShowInfoDialog(message, title string) {
++	fmt.Fprintf(os.Stderr, "INFO [%s]: %s\n", title, message)
++	sdl.ShowSimpleMessageBox(sdl.MESSAGEBOX_INFORMATION, title, message, nil)
++}
++
++func ShowErrorDialog(message string) {
++	fmt.Fprintf(os.Stderr, "ERROR: %s\n", message)
++	sdl.ShowSimpleMessageBox(sdl.MESSAGEBOX_ERROR, "I.K.E.M.E.N Error", message, nil)
++}
++
++func LoadFntTtf(f *Fnt, fontfile string, filename string, height int32) {
++	fileDir := SearchFile(filename, []string{fontfile, sys.motif.Def, "", "data/"}, "font/")
++	if fp := FileExist(fileDir); len(fp) == 0 {
++		var err error
++		fileDir, err = findfont.Find(fileDir)
++		if err != nil {
++			panic(fmt.Errorf("failed to find ttf font %v: %w", fileDir, err))
++		}
++	}
++	if height == -1 {
++		height = int32(f.Size[1])
++	} else {
++		f.Size[1] = uint16(height)
++	}
++	ttf, err := gfxFont.LoadFont(fileDir, height, int(sys.gameWidth), int(sys.gameHeight))
++	if err != nil {
++		panic(fmt.Errorf("failed to load ttf font %v: %w", fileDir, err))
++	}
++	f.ttf = ttf.(Font)
++	f.palettes = make([][256]uint32, 1)
++	for i := 0; i < 256; i++ {
++		f.palettes[0][i] = 0
++	}
++}
++
++func selectRenderer(cfgVal string) (Renderer, FontRenderer) {
++	return &Renderer_VK{}, &FontRenderer_VK{}
++}
++
++func Logcat(s string) {
++	fmt.Fprintln(os.Stderr, s)
++}
++
++func osPreferredLanguage() string {
++	if p := C.IKPreferredLanguage(); p != nil {
++		return strings.ToLower(C.GoString(p))
++	}
++	return ""
++}
+diff --git a/src/video_ffmpeg.go b/src/video_ffmpeg.go
+index ca9232e..ec42e5c 100644
+--- a/src/video_ffmpeg.go
++++ b/src/video_ffmpeg.go
+@@ -1,3 +1,5 @@
++//go:build !novideo
++
+ package main
+ 
+ import (
+diff --git a/src/video_stub.go b/src/video_stub.go
+new file mode 100644
+index 0000000..e0fd2a3
+--- /dev/null
++++ b/src/video_stub.go
+@@ -0,0 +1,22 @@
++//go:build novideo
++
++package main
++
++// Stub used for builds without FFmpeg (e.g. the iOS port). Stage/storyboard
++// video backgrounds are skipped; everything else keeps working.
++type bgVideo struct {
++	texture Texture
++	muted   bool
++}
++
++func (bgv *bgVideo) Open(filename string, volume int, sm BgVideoScaleMode, sf BgVideoScaleFilter, loop bool) error {
++	// Succeed silently: the background simply renders nothing (texture stays nil).
++	return nil
++}
++func (bgv *bgVideo) Tick() error        { return nil }
++func (bgv *bgVideo) SetPlaying(on bool) {}
++func (bgv *bgVideo) SetVisible(on bool) {}
++func (bgv *bgVideo) Reset()             {}
++func (bgv *bgVideo) updateAudioVolume() {}
++func (bgv *bgVideo) MixerCleared()      {}
++func (bgv *bgVideo) Close()             {}

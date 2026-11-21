@@ -1,0 +1,7 @@
+/build-ios/
+/.tools/
+*.ipa
+/game/save/logs/
+/game/save/replays/
+/game/cache/
+.DS_Store
