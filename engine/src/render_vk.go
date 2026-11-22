@@ -1535,6 +1535,8 @@ func (r *Renderer_VK) NewVulkanDevice(appInfo *vk.ApplicationInfo, window uintpt
 	}
 
 	r.surface = vk.SurfaceFromPointer(uintptr(surface))
+	// iOS: SDL has just put its Metal view on top of the window; bring the touch controls back above it
+	platformAfterWindow(sys.window.Window)
 
 	if r.gpuDevices, err = r.getPhysicalDevices(r.instance); err != nil {
 		r.gpuDevices = nil

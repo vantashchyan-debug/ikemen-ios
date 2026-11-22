@@ -1037,13 +1037,31 @@ static IKOverlayView *gOverlay;
 
 #pragma mark - C entry points (called from Go)
 
+// SDL adds its Metal view (Vulkan surface via MoltenVK) to the same root view *after* the window exists, i.e. after
+// this overlay was installed - it would then cover the controls and swallow every touch. Keep the overlay on top:
+// raise it whenever anything was added above it (checked a few times per second, costs nothing).
+static NSTimer *gRaiseTimer;
+
+static void IKOverlayRaise(void) {
+    UIView *parent = gOverlay.superview;
+    if (!parent) return;
+    if (parent.subviews.lastObject != gOverlay) [parent bringSubviewToFront:gOverlay];
+    gOverlay.frame = parent.bounds;
+}
+
 void IKOverlayInstall(void) {
-    if (gOverlay) return;
+    if (gOverlay) {
+        IKOverlayRaise();
+        return;
+    }
     UIViewController *root = IKRootViewController();
     if (!root) return;
     IKOverlayView *v = [[IKOverlayView alloc] initWithFrame:root.view.bounds];
+    v.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    v.layer.zPosition = 1000;               // drawn above the Metal layer even before it is raised
     [root.view addSubview:v];
     gOverlay = v;
+    gRaiseTimer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *t) { IKOverlayRaise(); }];
 }
 
 void IKOverlaySetSuspended(int suspended) {

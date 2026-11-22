@@ -89,10 +89,19 @@ index 00b2303..658c2b1 100644
  package main
  
 diff --git a/src/render_vk.go b/src/render_vk.go
-index e67fd5f..04e4727 100644
+index e67fd5f..f0a6e42 100644
 --- a/src/render_vk.go
 +++ b/src/render_vk.go
-@@ -1585,7 +1585,7 @@ func (r *Renderer_VK) NewVulkanDevice(appInfo *vk.ApplicationInfo, window uintpt
+@@ -1535,6 +1535,8 @@ func (r *Renderer_VK) NewVulkanDevice(appInfo *vk.ApplicationInfo, window uintpt
+ 	}
+ 
+ 	r.surface = vk.SurfaceFromPointer(uintptr(surface))
++	// iOS: SDL has just put its Metal view on top of the window; bring the touch controls back above it
++	platformAfterWindow(sys.window.Window)
+ 
+ 	if r.gpuDevices, err = r.getPhysicalDevices(r.instance); err != nil {
+ 		r.gpuDevices = nil
+@@ -1585,7 +1587,7 @@ func (r *Renderer_VK) NewVulkanDevice(appInfo *vk.ApplicationInfo, window uintpt
  		"VK_KHR_push_descriptor\x00",
  	}
  
@@ -101,7 +110,7 @@ index e67fd5f..04e4727 100644
  		deviceExtensions = append(deviceExtensions, "VK_KHR_portability_subset\x00")
  	}
  	deviceCreateInfo := &vk.DeviceCreateInfo{
-@@ -6774,8 +6774,8 @@ func (r *Renderer_VK) RenderQuad() {
+@@ -6774,8 +6776,8 @@ func (r *Renderer_VK) RenderQuad() {
  	}
  
  	// MacOS MoltenVK workaround: push constants need to be set every draw call
