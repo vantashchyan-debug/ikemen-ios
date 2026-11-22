@@ -365,26 +365,32 @@ func (bgm *Bgm) Open(filename string, loop, bgmVolume, bgmLoopStart, bgmLoopEnd,
 		return
 	}
 	var format beep.Format
-	if HasExtension(bgm.filename, ".ogg") {
+	// The decoder follows the file content, not only its name: a replacement track (for example an .mp3 dropped
+	// in place of a bundled .ogg on iOS, see util_ios.go mods/) still plays.
+	probe := bgm.filename
+	if ext := sniffAudioExt(f); ext != "" {
+		probe = ext
+	}
+	if HasExtension(probe, ".ogg") {
 		bgm.streamer, format, err = vorbis.Decode(f)
 		bgm.format = "ogg"
-	} else if HasExtension(bgm.filename, ".mp3") {
+	} else if HasExtension(probe, ".mp3") {
 		bgm.streamer, format, err = mp3.Decode(f)
 		bgm.format = "mp3"
-	} else if HasExtension(bgm.filename, ".wav") {
+	} else if HasExtension(probe, ".wav") {
 		bgm.streamer, format, err = wav.Decode(f)
 		bgm.format = "wav"
-	} else if HasExtension(bgm.filename, ".flac") {
+	} else if HasExtension(probe, ".flac") {
 		bgm.streamer, format, err = flac.Decode(f)
 		bgm.format = "flac"
-	} else if HasExtension(bgm.filename, ".mid") || HasExtension(bgm.filename, ".midi") {
+	} else if HasExtension(probe, ".mid") || HasExtension(probe, ".midi") {
 		if sf, sferr := loadSoundFont(sys.cfg.Sound.SoundFont); sferr != nil {
 			err = sferr
 		} else {
 			bgm.streamer, format, err = midi.Decode(f, sf, beep.SampleRate(int(sys.cfg.Sound.SampleRate)))
 			bgm.format = "midi"
 		}
-	} else if HasExtension(bgm.filename, ".xm") || HasExtension(bgm.filename, ".mod") || HasExtension(bgm.filename, ".it") || HasExtension(bgm.filename, ".s3m") {
+	} else if HasExtension(probe, ".xm") || HasExtension(probe, ".mod") || HasExtension(probe, ".it") || HasExtension(probe, ".s3m") {
 		bgm.streamer, format, err = xmpDecode(f)
 		bgm.format = "xmp"
 	} else {
@@ -1379,4 +1385,25 @@ func newPlaySndParams() *PlaySndParams {
 		freqMul:    1.0,
 		localScale: 1.0,
 	}
+}
+
+// sniffAudioExt guesses the audio format from the first bytes of a stream ("" = unknown, keep the file name).
+func sniffAudioExt(f io.ReadSeeker) string {
+	var h [12]byte
+	n, _ := io.ReadFull(f, h[:])
+	f.Seek(0, io.SeekStart)
+	if n < 4 {
+		return ""
+	}
+	switch {
+	case string(h[:4]) == "OggS":
+		return ".ogg"
+	case string(h[:4]) == "fLaC":
+		return ".flac"
+	case n >= 12 && string(h[:4]) == "RIFF" && string(h[8:12]) == "WAVE":
+		return ".wav"
+	case string(h[:3]) == "ID3", h[0] == 0xFF && h[1]&0xE0 == 0xE0:
+		return ".mp3"
+	}
+	return ""
 }

@@ -89,10 +89,21 @@ func prepareIOSWorkdir() error {
 		return err
 	}
 
+	mods := filepath.Join(work, "mods")
+	os.MkdirAll(mods, 0755)
+	writeModsReadme(mods)
 	for _, d := range iosAssetDirs {
 		src := filepath.Join(bundle, d)
 		if _, err := os.Stat(src); err != nil {
 			continue
+		}
+		// Single-file replacements: Documents/Ikemen/mods/<dir>/... is laid over the bundled <dir>
+		if hasFiles(filepath.Join(mods, d)) {
+			if mirror, err := buildModMirror(src, filepath.Join(mods, d), filepath.Join(work, "cache", "mods", d)); err == nil {
+				src = mirror
+			} else {
+				LogMessage("mods/%s: %v", d, err)
+			}
 		}
 		dst := filepath.Join(work, d)
 		if fi, err := os.Lstat(dst); err == nil {
@@ -130,6 +141,101 @@ func prepareIOSWorkdir() error {
 		os.MkdirAll(filepath.Join(work, d), 0755)
 	}
 	return os.Chdir(work)
+}
+
+func hasFiles(dir string) bool {
+	found := false
+	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && !strings.HasPrefix(d.Name(), ".") {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found
+}
+
+func stem(name string) string {
+	return strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
+}
+
+// buildModMirror rebuilds out/ as a tree of symlinks to the bundled dir, where every file the user put in mods/ at the
+// same relative path wins. A mod file replaces the bundled file with the same name *without extension* (an .mp3 can
+// replace a bundled .ogg: the link keeps the bundled name and the engine detects the real format), and mod files that
+// match nothing are added as new files.
+func buildModMirror(bundleDir, modDir, out string) (string, error) {
+	os.RemoveAll(out)
+	if err := os.MkdirAll(out, 0755); err != nil {
+		return "", err
+	}
+	used := map[string]bool{}
+	byStem := map[string]string{} // "rel/dir/stem" -> mod file
+	filepath.WalkDir(modDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || strings.HasPrefix(d.Name(), ".") {
+			return nil
+		}
+		rel, _ := filepath.Rel(modDir, p)
+		byStem[filepath.Join(filepath.Dir(rel), stem(d.Name()))] = p
+		return nil
+	})
+	err := filepath.WalkDir(bundleDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, _ := filepath.Rel(bundleDir, p)
+		target := filepath.Join(out, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		key := filepath.Join(filepath.Dir(rel), stem(d.Name()))
+		link := p
+		if m, ok := byStem[key]; ok {
+			link, used[m] = m, true
+		}
+		return os.Symlink(link, target)
+	})
+	if err != nil {
+		return "", err
+	}
+	for _, m := range byStem { // new files (no bundled counterpart)
+		if used[m] {
+			continue
+		}
+		rel, _ := filepath.Rel(modDir, m)
+		target := filepath.Join(out, rel)
+		os.MkdirAll(filepath.Dir(target), 0755)
+		os.Symlink(m, target)
+	}
+	return out, nil
+}
+
+func writeModsReadme(mods string) {
+	path := filepath.Join(mods, "README.txt")
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
+	os.MkdirAll(filepath.Join(mods, "sound", "stages"), 0755)
+	os.MkdirAll(filepath.Join(mods, "sound", "themes"), 0755)
+	os.WriteFile(path, []byte(`Veils of Blood - replace single files without rebuilding the app
+
+Put a file here at the same place as in the game, with the same name. The extension may differ:
+.mp3 .ogg .flac and .wav all work. Then close the game fully (swipe it away) and start it again.
+Delete the file to get the original back.
+
+Music:
+  sound/PressStart     "PRESS ANY BUTTON" screen
+  sound/Title          main menu
+  sound/Select         character select
+  sound/Versus         VS screen
+  sound/Winner         victory
+  sound/Continue       continue countdown
+  sound/Battle_Rooftop Dusk Rooftop arena
+  sound/stages/Greenhouse                 The Sacred Apple Tree Greenhouse
+  sound/stages/NewYear_Round1 ... Round3  Dusk Rooftop Snowy - New Year Night
+  sound/themes/kaito, kagetsu, kagetsu_vessel, dairek, seraphina   character themes (music plate)
+
+Example: mods/sound/Title.mp3 replaces the main menu music.
+`), 0644)
 }
 
 func copyFileIOS(src, dst string) error {

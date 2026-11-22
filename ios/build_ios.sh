@@ -22,7 +22,7 @@ XMP_VER="${XMP_VER:-4.7.4}"
 VERSION="${APP_VERSION:-1.0.0}"
 BUILD_NO="${APP_BUILD:-$(date +%Y%m%d%H%M)}"
 BUNDLE_ID="${BUNDLE_ID:-com.ikemen.go.ios}"
-DISPLAY_NAME="${DISPLAY_NAME:-Ikemen GO}"
+DISPLAY_NAME="${DISPLAY_NAME:-Veils of Blood}"
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
 log() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
