@@ -32,7 +32,8 @@ ios/engine-ios.patch    все изменения движка относите�
 2. GitHub → вкладка **Actions** → **iOS IPA**. Сборка запускается сама при пуше, вручную её запускает
    «Run workflow». Первая сборка идёт около 15 минут, следующие быстрее за счёт кэша.
 3. Скачай артефакт `Ikemen_GO-ios-N` (zip с `Ikemen_GO-engine.ipa`).
-4. Добавь свою игру:
+4. Добавь свою игру (музыка FLAC при этом сама перекодируется в Ogg Vorbis ≈128 кбит/с — IPA в ~4 раза меньше;
+   `--music-quality 6` ≈192 кбит/с, `-1` оставляет FLAC; файлы игры на диске не меняются):
    ```bash
    ~/Projects/ikemen-ios/ios/make_ipa.sh ~/Downloads/Ikemen_GO-ios-1.zip ~/Projects/ikemen ~/Ikemen_GO.ipa
    ```

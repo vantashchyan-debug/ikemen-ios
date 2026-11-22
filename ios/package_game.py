@@ -10,10 +10,12 @@ iPhone-friendly video/sound settings; it seeds Documents/Ikemen/save on first
 launch and is never overwritten afterwards.
 """
 import argparse
+import concurrent.futures
 import os
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -78,7 +80,52 @@ def du(path):
     return total
 
 
-def install_game(app: str, game: str):
+TEXT_SUFFIXES = (".def", ".lua", ".zss", ".cns", ".st", ".cmd", ".txt", ".ini", ".json")
+
+
+def compress_music(dest: str, quality: int):
+    """FLAC -> Ogg Vorbis inside the app copy only (the game folder on disk is untouched).
+    The engine decodes .ogg natively. The sample rate is kept, so bgmloopstart/bgmloopend (in samples) stay valid.
+    Every text file that names a .flac is rewritten to the .ogg name."""
+    flacs = []
+    for root, _dirs, files in os.walk(dest):
+        flacs += [os.path.join(root, f) for f in files if f.lower().endswith(".flac")]
+    if not flacs:
+        return
+    before = sum(os.path.getsize(f) for f in flacs)
+
+    def enc(src):
+        out = src[: -len(".flac")] + ".ogg"
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-map", "0:a:0", "-c:a", "libvorbis", "-q:a", str(quality),
+                            "-map_metadata", "-1", out], capture_output=True, text=True)
+        if r.returncode != 0 or not os.path.exists(out):
+            return src, r.stderr.strip() or "ffmpeg failed"
+        os.unlink(src)
+        return src, None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
+        failed = [(s_, e) for s_, e in pool.map(enc, flacs) if e]
+    if failed:
+        sys.exit("music conversion failed:\n" + "\n".join(f"  {s_}: {e}" for s_, e in failed))
+    after = sum(os.path.getsize(f[: -len(".flac")] + ".ogg") for f in flacs)
+    pat = re.compile(r"(?i)\.flac\b")
+    fixed = 0
+    for root, _dirs, files in os.walk(dest):
+        for f in files:
+            if not f.lower().endswith(TEXT_SUFFIXES):
+                continue
+            fp = os.path.join(root, f)
+            with open(fp, encoding="utf-8", errors="surrogateescape") as fh:
+                text = fh.read()
+            if pat.search(text):
+                with open(fp, "w", encoding="utf-8", errors="surrogateescape") as fh:
+                    fh.write(pat.sub(".ogg", text))
+                fixed += 1
+    print(f"  ~ music: {len(flacs)} FLAC -> Ogg Vorbis q{quality}: {before / 1e6:.1f} MB -> {after / 1e6:.1f} MB "
+          f"({fixed} files re-pointed)")
+
+
+def install_game(app: str, game: str, music_quality: int = 4):
     if not os.path.isfile(os.path.join(game, "save", "config.ini")) and not os.path.isdir(os.path.join(game, "data")):
         sys.exit(f"'{game}' does not look like an Ikemen GO folder (no data/ or save/config.ini)")
     dest = os.path.join(app, "game")
@@ -105,6 +152,8 @@ def install_game(app: str, game: str):
         else:
             shutil.copy2(src, os.path.join(dest, "save", f))
             print(f"  + save/{f}")
+    if music_quality >= 0:
+        compress_music(dest, music_quality)
     print(f"  game total: {du(dest) / 1e6:.1f} MB")
 
 
@@ -149,10 +198,12 @@ def main():
     ap.add_argument("--app", help="Ikemen.app directory to modify in place")
     ap.add_argument("--ipa", help="engine .ipa built by CI")
     ap.add_argument("--out", help="output .ipa (with --ipa)")
+    ap.add_argument("--music-quality", type=int, default=4,
+                    help="Ogg Vorbis quality for the music (0..10, default 4 ~ 128 kbps); -1 keeps the original FLAC")
     a = ap.parse_args()
     game = os.path.abspath(a.game)
     if a.app:
-        install_game(a.app, game)
+        install_game(a.app, game, a.music_quality)
         return
     if not (a.ipa and a.out):
         ap.error("use --app, or --ipa together with --out")
@@ -160,7 +211,7 @@ def main():
         print(f"Extracting {a.ipa}")
         app = extract_ipa(a.ipa, tmp)
         print(f"Adding game from {game}")
-        install_game(app, game)
+        install_game(app, game, a.music_quality)
         print(f"Writing {a.out}")
         write_ipa(tmp, a.out)
     print(f"Done: {a.out} ({os.path.getsize(a.out) / 1e6:.1f} MB)")
