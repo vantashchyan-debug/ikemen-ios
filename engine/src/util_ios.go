@@ -9,6 +9,7 @@ package main
 
 // Implemented by the native iOS shell (ios/src/*.m), resolved at final link.
 extern void        IKOverlayInstall(void);
+extern void        IKOverlayInstallWindow(void *sdlWindow);
 extern void        IKOverlaySetSuspended(int suspended);
 extern const char* IKPreferredLanguage(void);
 */
@@ -23,6 +24,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"unsafe"
 
 	findfont "github.com/flopp/go-findfont"
 	"github.com/veandco/go-sdl2/sdl"
@@ -178,7 +180,9 @@ func platformBeforeWindow(flags sdl.WindowFlags) sdl.WindowFlags {
 }
 
 func platformAfterWindow(window *sdl.Window) {
-	C.IKOverlayInstall()
+	// Pass SDL's own window: the native shell takes its UIWindow from it instead of searching the
+	// app's window list (SDL2 windows are not attached to a UIScene, so on iOS 26+ that search finds nothing).
+	C.IKOverlayInstallWindow(unsafe.Pointer(window))
 }
 
 func platformAppSuspended(suspended bool) {

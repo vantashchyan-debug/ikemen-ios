@@ -308,10 +308,10 @@ index ebd02a8..99f0dda 100644
  
 diff --git a/b/src/util_ios.go b/src/util_ios.go
 new file mode 100644
-index 0000000..c512426
+index 0000000..0108125
 --- /dev/null
 +++ b/src/util_ios.go
-@@ -0,0 +1,284 @@
+@@ -0,0 +1,288 @@
 +//go:build ios
 +
 +package main
@@ -323,6 +323,7 @@ index 0000000..c512426
 +
 +// Implemented by the native iOS shell (ios/src/*.m), resolved at final link.
 +extern void        IKOverlayInstall(void);
++extern void        IKOverlayInstallWindow(void *sdlWindow);
 +extern void        IKOverlaySetSuspended(int suspended);
 +extern const char* IKPreferredLanguage(void);
 +*/
@@ -337,6 +338,7 @@ index 0000000..c512426
 +	"runtime"
 +	"runtime/debug"
 +	"strings"
++	"unsafe"
 +
 +	findfont "github.com/flopp/go-findfont"
 +	"github.com/veandco/go-sdl2/sdl"
@@ -492,7 +494,9 @@ index 0000000..c512426
 +}
 +
 +func platformAfterWindow(window *sdl.Window) {
-+	C.IKOverlayInstall()
++	// Pass SDL's own window: the native shell takes its UIWindow from it instead of searching the
++	// app's window list (SDL2 windows are not attached to a UIScene, so on iOS 26+ that search finds nothing).
++	C.IKOverlayInstallWindow(unsafe.Pointer(window))
 +}
 +
 +func platformAppSuspended(suspended bool) {

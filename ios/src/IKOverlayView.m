@@ -10,6 +10,8 @@
 #import "IKBridge.h"
 #import <GameController/GameController.h>
 #import <QuartzCore/QuartzCore.h>
+#include "SDL.h"
+#include "SDL_syswm.h"
 
 #pragma mark - Root view controller lookup
 
@@ -1037,31 +1039,96 @@ static IKOverlayView *gOverlay;
 
 #pragma mark - C entry points (called from Go)
 
-// SDL adds its Metal view (Vulkan surface via MoltenVK) to the same root view *after* the window exists, i.e. after
-// this overlay was installed - it would then cover the controls and swallow every touch. Keep the overlay on top:
-// raise it whenever anything was added above it (checked a few times per second, costs nothing).
+// ---------------------------------------------------------------------------------------------------------------
+// Installation. The overlay lives in SDL's own UIWindow (handed over by the engine), above SDL's view and above the
+// Metal view SDL adds later for the Vulkan surface. Diagnostics go to Documents/Ikemen/save/logs/overlay.log.
 static NSTimer *gRaiseTimer;
+static void *gSDLWindow;
+static int gInstallTries;
+
+static void IKOverlayLog(NSString *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:ap];
+    va_end(ap);
+    NSLog(@"[IKOverlay] %@", msg);
+    NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *dir = [docs stringByAppendingPathComponent:@"Ikemen/save/logs"];
+    [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *path = [dir stringByAppendingPathComponent:@"overlay.log"];
+    NSString *line = [NSString stringWithFormat:@"%@  %@\n", [NSDate date], msg];
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+    if (!fh) {
+        [line writeToFile:path atomically:NO encoding:NSUTF8StringEncoding error:nil];
+        return;
+    }
+    [fh seekToEndOfFile];
+    [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    [fh closeFile];
+}
+
+static UIWindow *IKGameWindow(void) {
+    if (gSDLWindow) {
+        SDL_SysWMinfo info;
+        SDL_VERSION(&info.version);
+        if (SDL_GetWindowWMInfo((SDL_Window *)gSDLWindow, &info) && info.subsystem == SDL_SYSWM_UIKIT && info.info.uikit.window) {
+            return info.info.uikit.window;
+        }
+    }
+    UIViewController *root = IKRootViewController();
+    return root.view.window;
+}
 
 static void IKOverlayRaise(void) {
     UIView *parent = gOverlay.superview;
     if (!parent) return;
     if (parent.subviews.lastObject != gOverlay) [parent bringSubviewToFront:gOverlay];
-    gOverlay.frame = parent.bounds;
+    if (!CGRectEqualToRect(gOverlay.frame, parent.bounds)) gOverlay.frame = parent.bounds;
+}
+
+static BOOL IKOverlayTryInstall(void) {
+    if (gOverlay) {
+        IKOverlayRaise();
+        return YES;
+    }
+    gInstallTries++;
+    UIWindow *win = IKGameWindow();
+    UIView *host = win.rootViewController.view ?: win;
+    if (!host || host.bounds.size.width < 1) {
+        if (gInstallTries == 1 || gInstallTries % 20 == 0)
+            IKOverlayLog(@"install try %d: no game window yet (sdl=%p win=%@ host=%@)", gInstallTries, gSDLWindow, win, host);
+        return NO;
+    }
+    IKOverlayView *v = [[IKOverlayView alloc] initWithFrame:host.bounds];
+    v.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    v.layer.zPosition = 1000;               // drawn above the Metal layer even before it is raised
+    v.userInteractionEnabled = YES;
+    [host addSubview:v];
+    gOverlay = v;
+    IKOverlayLog(@"installed on try %d: host=%@ bounds=%@ controls=%lu profile=%@", gInstallTries, NSStringFromClass(host.class),
+                 NSStringFromCGRect(host.bounds), (unsigned long)IKLayoutStore.shared.active.controls.count,
+                 IKLayoutStore.shared.active.name);
+    return YES;
+}
+
+static void IKOverlayStartTimer(void) {
+    if (gRaiseTimer) return;
+    // retries the installation until the game window exists, then keeps the overlay on top
+    gRaiseTimer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *t) {
+        if (IKOverlayTryInstall()) IKOverlayRaise();
+    }];
+    [NSRunLoop.mainRunLoop addTimer:gRaiseTimer forMode:NSRunLoopCommonModes];
+}
+
+void IKOverlayInstallWindow(void *sdlWindow) {
+    if (sdlWindow) gSDLWindow = sdlWindow;
+    IKOverlayTryInstall();
+    IKOverlayStartTimer();
 }
 
 void IKOverlayInstall(void) {
-    if (gOverlay) {
-        IKOverlayRaise();
-        return;
-    }
-    UIViewController *root = IKRootViewController();
-    if (!root) return;
-    IKOverlayView *v = [[IKOverlayView alloc] initWithFrame:root.view.bounds];
-    v.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    v.layer.zPosition = 1000;               // drawn above the Metal layer even before it is raised
-    [root.view addSubview:v];
-    gOverlay = v;
-    gRaiseTimer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *t) { IKOverlayRaise(); }];
+    IKOverlayTryInstall();
+    IKOverlayStartTimer();
 }
 
 void IKOverlaySetSuspended(int suspended) {

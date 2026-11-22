@@ -9,6 +9,7 @@ extern "C" {
 
 // Go -> native
 void        IKOverlayInstall(void);
+void        IKOverlayInstallWindow(void *sdlWindow);   // SDL_Window* of the game window
 void        IKOverlaySetSuspended(int suspended);
 const char *IKPreferredLanguage(void);
 
