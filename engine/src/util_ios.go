@@ -163,6 +163,11 @@ func applyIOSConfigOverrides(cfg *Config) {
 	if cfg.Video.Framerate <= 0 || cfg.Video.Framerate > 60 {
 		cfg.Video.Framerate = 60
 	}
+	// Internal resolution: Veils of Blood is authored at 1280x720. Rendering more than that only costs GPU time
+	// and battery (the swapchain itself stays at the native 2532x1170, so text and lines remain sharp).
+	if cfg.Video.GameWidth > 1280 || cfg.Video.GameHeight > 720 {
+		cfg.Video.GameWidth, cfg.Video.GameHeight = 1280, 720
+	}
 	// Decoding whole BGM tracks to RAM costs hundreds of MB with FLAC music.
 	cfg.Sound.BGMRAMBuffer = false
 	cfg.Debug.DumpLuaTables = false

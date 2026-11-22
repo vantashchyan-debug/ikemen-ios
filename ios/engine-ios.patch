@@ -1,3 +1,13 @@
+diff --git a/go.mod b/go.mod
+index 7cc8fd5..c081a11 100644
+--- a/go.mod
++++ b/go.mod
+@@ -47,3 +47,5 @@ require (
+ 	golang.org/x/image v0.22.0
+ 	golang.org/x/sys v0.18.0
+ )
++
++replace github.com/Eiton/vulkan => ./third_party/vulkan
 diff --git a/src/font_gl33.go b/src/font_gl33.go
 index 0e7e970..9a666d8 100644
 --- a/src/font_gl33.go
@@ -51,7 +61,7 @@ index e285176..55db11e 100644
  	sys.cfg = *cfg
  	// Logcat("LOG: Config Loaded. System Script: " + sys.cfg.Config.System)
  
-diff --git a/src/platform_hooks_other.go b/src/platform_hooks_other.go
+diff --git a/b/src/platform_hooks_other.go b/src/platform_hooks_other.go
 new file mode 100644
 index 0000000..55ab891
 --- /dev/null
@@ -209,7 +219,7 @@ index f67ba22..000763b 100644
  		case sdl.ControllerAxisEvent:
  			// FIX: Map Instance ID (t.Which) to Array Index
  			if idx := findControllerIndex(t.Which); idx != -1 {
-diff --git a/src/touch_input.go b/src/touch_input.go
+diff --git a/b/src/touch_input.go b/src/touch_input.go
 new file mode 100644
 index 0000000..ec9e99d
 --- /dev/null
@@ -287,12 +297,12 @@ index ebd02a8..99f0dda 100644
  
  package main
  
-diff --git a/src/util_ios.go b/src/util_ios.go
+diff --git a/b/src/util_ios.go b/src/util_ios.go
 new file mode 100644
-index 0000000..1f4fc48
+index 0000000..c512426
 --- /dev/null
 +++ b/src/util_ios.go
-@@ -0,0 +1,272 @@
+@@ -0,0 +1,284 @@
 +//go:build ios
 +
 +package main
@@ -342,6 +352,13 @@ index 0000000..1f4fc48
 +	sdl.SetHint("SDL_IOS_HIDE_HOME_INDICATOR", "2") // dim + defer edge gestures
 +	sdl.SetHint("SDL_IOS_IDLE_TIMER_DISABLED", "1")
 +	sdl.SetHint("SDL_ACCELEROMETER_AS_JOYSTICK", "0")
++	// Point SDL straight at the bundled MoltenVK (Vulkan -> Metal).
++	if exe, err := os.Executable(); err == nil {
++		mvk := filepath.Join(filepath.Dir(exe), "Frameworks", "MoltenVK.framework", "MoltenVK")
++		if _, err := os.Stat(mvk); err == nil {
++			sdl.SetHint("SDL_VULKAN_LIBRARY", mvk)
++		}
++	}
 +
 +	if err := prepareIOSWorkdir(); err != nil {
 +		ShowErrorDialog("Failed to prepare game files:\n" + err.Error())
@@ -450,6 +467,11 @@ index 0000000..1f4fc48
 +	}
 +	if cfg.Video.Framerate <= 0 || cfg.Video.Framerate > 60 {
 +		cfg.Video.Framerate = 60
++	}
++	// Internal resolution: Veils of Blood is authored at 1280x720. Rendering more than that only costs GPU time
++	// and battery (the swapchain itself stays at the native 2532x1170, so text and lines remain sharp).
++	if cfg.Video.GameWidth > 1280 || cfg.Video.GameHeight > 720 {
++		cfg.Video.GameWidth, cfg.Video.GameHeight = 1280, 720
 +	}
 +	// Decoding whole BGM tracks to RAM costs hundreds of MB with FLAC music.
 +	cfg.Sound.BGMRAMBuffer = false
@@ -575,7 +597,7 @@ index ca9232e..ec42e5c 100644
  package main
  
  import (
-diff --git a/src/video_stub.go b/src/video_stub.go
+diff --git a/b/src/video_stub.go b/src/video_stub.go
 new file mode 100644
 index 0000000..e0fd2a3
 --- /dev/null

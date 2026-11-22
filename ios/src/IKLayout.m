@@ -489,7 +489,7 @@ NSArray<NSValue *> *IKParseMacro(NSString *script, int facing, NSString **error)
 #pragma mark Presets
 
 + (NSArray<NSString *> *)presetNames {
-    return @[ @"Классика (6 кнопок)", @"4 кнопки", @"Плавающий стик", @"Крупные кнопки", @"Для левши", @"Минимум (только меню)" ];
+    return @[ @"Veils of Blood (7 кнопок)", @"4 кнопки", @"Плавающий стик", @"Крупные кнопки", @"Для левши", @"Минимум (только меню)" ];
 }
 
 static IKControl *IKBtn(NSString *label, uint32_t mask, CGFloat cx, CGFloat cy, CGFloat size) {
@@ -530,21 +530,23 @@ static IKControl *IKKey(NSString *label, NSInteger key, CGFloat cx, CGFloat cy) 
     }
     [p.controls addObject:pad];
 
+    // Veils of Blood: x y z = LP MP HP (top row), a b c = LK MK HK (bottom row), d = SP (reserved for a future mechanic)
     CGFloat s = idx == 3 ? 78 : 62;
     if (idx == 1) {
         [p.controls addObjectsFromArray:@[
-            IKBtn(@"A", IKBtnA, 0.78, 0.82, 70), IKBtn(@"B", IKBtnB, 0.89, 0.66, 70),
-            IKBtn(@"X", IKBtnX, 0.67, 0.66, 70), IKBtn(@"Y", IKBtnY, 0.78, 0.50, 70),
+            IKBtn(@"LP", IKBtnX, 0.67, 0.66, 70), IKBtn(@"HP", IKBtnZ, 0.78, 0.50, 70),
+            IKBtn(@"LK", IKBtnA, 0.78, 0.82, 70), IKBtn(@"HK", IKBtnC, 0.89, 0.66, 70),
         ]];
     } else {
         CGFloat dx = idx == 3 ? 0.105 : 0.088, dy = idx == 3 ? 0.235 : 0.2;
         CGFloat x0 = idx == 3 ? 0.66 : 0.70, y1 = 0.83, y0 = y1 - dy;
         [p.controls addObjectsFromArray:@[
-            IKBtn(@"X", IKBtnX, x0, y0 + 0.03, s), IKBtn(@"Y", IKBtnY, x0 + dx, y0, s), IKBtn(@"Z", IKBtnZ, x0 + 2 * dx, y0 - 0.015, s),
-            IKBtn(@"A", IKBtnA, x0, y1 + 0.03, s), IKBtn(@"B", IKBtnB, x0 + dx, y1, s), IKBtn(@"C", IKBtnC, x0 + 2 * dx, y1 - 0.015, s),
+            IKBtn(@"LP", IKBtnX, x0, y0 + 0.03, s), IKBtn(@"MP", IKBtnY, x0 + dx, y0, s), IKBtn(@"HP", IKBtnZ, x0 + 2 * dx, y0 - 0.015, s),
+            IKBtn(@"LK", IKBtnA, x0, y1 + 0.03, s), IKBtn(@"MK", IKBtnB, x0 + dx, y1, s), IKBtn(@"HK", IKBtnC, x0 + 2 * dx, y1 - 0.015, s),
         ]];
     }
-    IKControl *d = IKBtn(@"D", IKBtnDd, 0.93, 0.36, 48); d.visible = NO;
+    // SP: reserved button, small and dim until the mechanic exists
+    IKControl *d = IKBtn(@"SP", IKBtnDd, 0.955, 0.40, 44); d.opacity = 0.45; d.showMode = IKShowInFight;
     IKControl *w = IKBtn(@"W", IKBtnW, 0.86, 0.36, 48); w.visible = NO;
     [p.controls addObjectsFromArray:@[ d, w ]];
 
@@ -553,10 +555,17 @@ static IKControl *IKKey(NSString *label, NSInteger key, CGFloat cx, CGFloat cy) 
     [p.controls addObject:start];
     [p.controls addObject:IKKey(@"ESC", SDLK_ESCAPE, 0.425, 0.93)];
 
-    IKControl *hado = [IKControl controlWithType:IKControlTypeMacro];
-    hado.label = @"236A"; hado.macro = @"236+a"; hado.cx = 0.62; hado.cy = 0.42; hado.size = 50; hado.visible = NO;
-    hado.showMode = IKShowInFight;
-    [p.controls addObject:hado];
+    // taunt = tap Down four times (also eats a Daughter Apple in the Greenhouse)
+    IKControl *taunt = [IKControl controlWithType:IKControlTypeMacro];
+    taunt.label = @"↓↓↓↓"; taunt.macro = @"2:3 5:3 2:3 5:3 2:3 5:3 2:3 5:2";
+    taunt.cx = 0.955; taunt.cy = 0.22; taunt.size = 44; taunt.aspect = 0.6; taunt.shape = IKShapeRounded;
+    taunt.showMode = IKShowInFight;
+    [p.controls addObject:taunt];
+    // example quick-special, hidden by default (show / edit it in the layout editor)
+    IKControl *qcf = [IKControl controlWithType:IKControlTypeMacro];
+    qcf.label = @"↓↘→LP"; qcf.macro = @"236+x"; qcf.cx = 0.62; qcf.cy = 0.42; qcf.size = 50; qcf.visible = NO;
+    qcf.showMode = IKShowInFight;
+    [p.controls addObject:qcf];
 
     [p.controls addObject:menu];
     if (idx == 4) [p mirrorHorizontally];

@@ -34,6 +34,8 @@ IOS_OVERRIDES = {
         "VSync": "1",
         "Framerate": "60",
         "EnableModelShadow": "0",
+        "GameWidth": "1280",
+        "GameHeight": "720",
         "RendererDebugMode": "0",
     },
     "Sound": {
