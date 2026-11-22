@@ -1079,7 +1079,16 @@ static UIWindow *IKGameWindow(void) {
     return root.view.window;
 }
 
+// SDL replaces the root view controller's view when it creates the Metal view for the Vulkan surface
+// (SDL_uikitview -setSDLWindow:), throwing the old view - and anything inside it - out of the window. So the overlay
+// lives directly in the UIWindow, which SDL keeps, and is moved back on top whenever something was put above it.
 static void IKOverlayRaise(void) {
+    if (!gOverlay) return;
+    UIWindow *win = IKGameWindow();
+    if (win && gOverlay.superview != win) {
+        [win addSubview:gOverlay];
+        IKOverlayLog(@"overlay moved into the game window (was %@)", NSStringFromClass(gOverlay.superview.class));
+    }
     UIView *parent = gOverlay.superview;
     if (!parent) return;
     if (parent.subviews.lastObject != gOverlay) [parent bringSubviewToFront:gOverlay];
@@ -1093,7 +1102,7 @@ static BOOL IKOverlayTryInstall(void) {
     }
     gInstallTries++;
     UIWindow *win = IKGameWindow();
-    UIView *host = win.rootViewController.view ?: win;
+    UIView *host = win;                     // the window itself: SDL swaps the views inside it, never the window
     if (!host || host.bounds.size.width < 1) {
         if (gInstallTries == 1 || gInstallTries % 20 == 0)
             IKOverlayLog(@"install try %d: no game window yet (sdl=%p win=%@ host=%@)", gInstallTries, gSDLWindow, win, host);
